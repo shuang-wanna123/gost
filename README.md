@@ -1,21 +1,4 @@
 
-## 仓库结构
-
-```
-gost-manager/
-├── README.md
-├── gost.sh
-├── LICENSE
-└── images/
-    ├── menu.png
-    └── install.png
-```
-
----
-
-## README.md
-
-```markdown
 # GOST 一键管理脚本
 
 <p align="center">
