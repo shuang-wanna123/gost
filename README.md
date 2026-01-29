@@ -213,13 +213,3 @@ gost
 ## 🙏 致谢
 
 - [ginuerzh/gost](https://github.com/ginuerzh/gost) - GOST 代理工具
-```
-
----
-
-## LICENSE 文件
-
-```
-MIT License
-
-Copyright (c) 2024 shuang-wanna123
