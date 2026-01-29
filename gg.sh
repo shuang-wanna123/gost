@@ -4,170 +4,175 @@
 # 快捷命令: gg
 #===============================================
 
-GOST_PATH="/usr/local/bin/gost"
-GOST_CONF_DIR="/etc/gost"
-GOST_TUNNEL_DIR="/etc/gost/tunnels"
-GOST_VERSION="2.11.5"
-MANAGER_PATH="/usr/local/bin/gg"
+# 配置路径
+GOST_BIN="/usr/local/bin/gost"
+CONF_DIR="/etc/gost"
+TUNNEL_DIR="/etc/gost/tunnels"
+SERVICE_PREFIX="gost-tun"
+MANAGER_CMD="/usr/local/bin/gg"
+GOST_VER="2.11.5"
 
-# 颜色
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-NC='\033[0m'
+# 颜色定义
+R='\033[0;31m'
+G='\033[0;32m'
+Y='\033[1;33m'
+C='\033[0;36m'
+B='\033[0;34m'
+N='\033[0m'
 
 #===============================================
-# 基础函数
+# 工具函数
 #===============================================
 
-print_logo() {
-    clear
-    echo -e "${CYAN}"
-    echo "  ██████╗  ██████╗ ███████╗████████╗"
-    echo " ██╔════╝ ██╔═══██╗██╔════╝╚══██╔══╝"
-    echo " ██║  ███╗██║   ██║███████╗   ██║   "
-    echo " ██║   ██║██║   ██║╚════██║   ██║   "
-    echo " ╚██████╔╝╚██████╔╝███████║   ██║   "
-    echo "  ╚═════╝  ╚═════╝ ╚══════╝   ╚═╝   "
-    echo -e "${NC}"
-    echo -e "${YELLOW}    GOST 多隧道管理脚本 v2.0${NC}"
-    echo -e "${YELLOW}    快捷命令: ${GREEN}gg${NC}"
+msg_info()  { echo -e "${G}[✓]${N} $1"; }
+msg_warn()  { echo -e "${Y}[!]${N} $1"; }
+msg_error() { echo -e "${R}[✗]${N} $1"; }
+
+# 按任意键继续
+pause() {
     echo ""
-}
-
-press_any_key() {
-    echo ""
-    read -p "按回车键继续..."
-}
-
-# 检查 gost 是否安装
-check_gost_installed() {
-    [ -f "$GOST_PATH" ]
-}
-
-# 下载安装 gost
-install_gost_binary() {
-    if check_gost_installed; then
-        echo -e "${GREEN}[✓]${NC} GOST 已安装: $("$GOST_PATH" -V 2>&1 | head -n1)"
-        return 0
-    fi
-    
-    echo -e "${GREEN}[*]${NC} 开始下载 GOST..."
-    
-    ARCH=$(uname -m)
-    case $ARCH in
-        x86_64)  ARCH="amd64" ;;
-        aarch64) ARCH="arm64" ;;
-        armv7l)  ARCH="armv7" ;;
-        i386|i686) ARCH="386" ;;
-        *)       echo -e "${RED}[✗]${NC} 不支持的架构: $ARCH"; return 1 ;;
-    esac
-    
-    DOWNLOAD_URL="https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-${ARCH}-${GOST_VERSION}.gz"
-    
-    cd /tmp
-    rm -f gost.gz gost 2>/dev/null
-    
-    if command -v wget &>/dev/null; then
-        wget -q --show-progress -O gost.gz "$DOWNLOAD_URL" || { echo -e "${RED}[✗]${NC} 下载失败"; return 1; }
-    elif command -v curl &>/dev/null; then
-        curl -L -o gost.gz "$DOWNLOAD_URL" || { echo -e "${RED}[✗]${NC} 下载失败"; return 1; }
-    else
-        echo -e "${RED}[✗]${NC} 请先安装 wget 或 curl"
-        return 1
-    fi
-    
-    gunzip -f gost.gz
-    chmod +x gost
-    mv gost "$GOST_PATH"
-    
-    echo -e "${GREEN}[✓]${NC} GOST 安装成功: $("$GOST_PATH" -V 2>&1 | head -n1)"
-    return 0
+    read -rp "按回车键继续..."
 }
 
 # 初始化目录
-init_dirs() {
-    mkdir -p "$GOST_TUNNEL_DIR"
+init_env() {
+    mkdir -p "$TUNNEL_DIR"
+}
+
+# 打印Logo
+show_logo() {
+    clear
+    echo -e "${C}"
+    echo '   ██████╗  ██████╗ ███████╗████████╗'
+    echo '  ██╔════╝ ██╔═══██╗██╔════╝╚══██╔══╝'
+    echo '  ██║  ███╗██║   ██║███████╗   ██║   '
+    echo '  ██║   ██║██║   ██║╚════██║   ██║   '
+    echo '  ╚██████╔╝╚██████╔╝███████║   ██║   '
+    echo '   ╚═════╝  ╚═════╝ ╚══════╝   ╚═╝   '
+    echo -e "${N}"
+    echo -e "${Y}     GOST 多隧道管理 v2.0  |  命令: gg${N}"
+    echo ""
+}
+
+#===============================================
+# GOST 安装
+#===============================================
+
+check_gost() {
+    [[ -x "$GOST_BIN" ]]
+}
+
+install_gost() {
+    if check_gost; then
+        msg_info "GOST 已安装: $($GOST_BIN -V 2>&1 | head -1)"
+        return 0
+    fi
+
+    msg_info "正在下载 GOST..."
+
+    local arch
+    case "$(uname -m)" in
+        x86_64)  arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        armv7l)  arch="armv7" ;;
+        i686)    arch="386" ;;
+        *) msg_error "不支持的架构: $(uname -m)"; return 1 ;;
+    esac
+
+    local url="https://github.com/ginuerzh/gost/releases/download/v${GOST_VER}/gost-linux-${arch}-${GOST_VER}.gz"
+    
+    cd /tmp || return 1
+    rm -f gost.gz gost 2>/dev/null
+
+    if command -v wget &>/dev/null; then
+        wget -q --show-progress -O gost.gz "$url" || { msg_error "下载失败"; return 1; }
+    elif command -v curl &>/dev/null; then
+        curl -L -o gost.gz "$url" || { msg_error "下载失败"; return 1; }
+    else
+        msg_error "请先安装 wget 或 curl"
+        return 1
+    fi
+
+    gunzip -f gost.gz || { msg_error "解压失败"; return 1; }
+    chmod +x gost
+    mv -f gost "$GOST_BIN"
+
+    msg_info "GOST 安装成功: $($GOST_BIN -V 2>&1 | head -1)"
 }
 
 # 安装快捷命令
-install_shortcut() {
-    # 获取当前脚本的完整内容并写入
-    if [ -f "$0" ]; then
-        cat "$0" > "$MANAGER_PATH"
-    else
-        # 如果是通过管道执行的，从stdin读取
-        return 1
+install_cmd() {
+    local script_path
+    script_path="$(readlink -f "$0")"
+    
+    if [[ -f "$script_path" && "$script_path" != "$MANAGER_CMD" ]]; then
+        cp -f "$script_path" "$MANAGER_CMD"
+        chmod +x "$MANAGER_CMD"
     fi
-    chmod +x "$MANAGER_PATH"
-    
-    # 创建软链接备用
-    ln -sf "$MANAGER_PATH" /usr/bin/gg 2>/dev/null
-    
-    hash -r 2>/dev/null
 }
 
 #===============================================
-# 隧道管理函数
+# 隧道核心函数
 #===============================================
 
-# 获取所有隧道
-get_all_tunnels() {
-    ls "$GOST_TUNNEL_DIR"/*.json 2>/dev/null | xargs -I{} basename {} .json
+# 获取服务名
+svc_name() {
+    echo "${SERVICE_PREFIX}-$1"
 }
 
-# 获取隧道数量
-get_tunnel_count() {
-    ls "$GOST_TUNNEL_DIR"/*.json 2>/dev/null | wc -l
+# 获取所有隧道名
+get_tunnels() {
+    find "$TUNNEL_DIR" -maxdepth 1 -name "*.json" -printf "%f\n" 2>/dev/null | sed 's/\.json$//' | sort
 }
 
-# 检查隧道是否存在
+# 隧道数量
+tunnel_count() {
+    get_tunnels | wc -l
+}
+
+# 运行中的隧道数
+running_count() {
+    local count=0
+    for t in $(get_tunnels); do
+        systemctl is-active --quiet "$(svc_name "$t")" && ((count++))
+    done
+    echo "$count"
+}
+
+# 隧道是否存在
 tunnel_exists() {
-    [ -f "$GOST_TUNNEL_DIR/$1.json" ]
-}
-
-# 获取隧道服务名
-get_service_name() {
-    echo "gost-$1"
-}
-
-# 检查隧道服务状态
-get_tunnel_status() {
-    local name=$1
-    local service=$(get_service_name "$name")
-    if systemctl is-active --quiet "$service" 2>/dev/null; then
-        echo -e "${GREEN}运行中${NC}"
-    else
-        echo -e "${RED}已停止${NC}"
-    fi
+    [[ -f "$TUNNEL_DIR/$1.json" ]]
 }
 
 # 读取隧道配置
-read_tunnel_config() {
-    local name=$1
-    local config_file="$GOST_TUNNEL_DIR/$name.json"
-    if [ -f "$config_file" ]; then
-        cat "$config_file"
+get_conf() {
+    local name=$1 key=$2
+    grep "\"$key\"" "$TUNNEL_DIR/$name.json" 2>/dev/null | sed 's/.*: *"\(.*\)".*/\1/'
+}
+
+# 隧道状态
+tunnel_status() {
+    if systemctl is-active --quiet "$(svc_name "$1")" 2>/dev/null; then
+        echo -e "${G}运行中${N}"
+    else
+        echo -e "${R}已停止${N}"
     fi
 }
 
-# 创建隧道服务
-create_tunnel_service() {
-    local name=$1
-    local exec_cmd=$2
-    local service=$(get_service_name "$name")
-    
-    cat > "/etc/systemd/system/${service}.service" << EOF
+# 创建systemd服务
+create_service() {
+    local name=$1 cmd=$2
+    local svc
+    svc=$(svc_name "$name")
+
+    cat > "/etc/systemd/system/${svc}.service" <<EOF
 [Unit]
 Description=GOST Tunnel - $name
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=$exec_cmd
+ExecStart=$cmd
 Restart=always
 RestartSec=3
 LimitNOFILE=65535
@@ -175,486 +180,491 @@ LimitNOFILE=65535
 [Install]
 WantedBy=multi-user.target
 EOF
-    
+
     systemctl daemon-reload
-    systemctl enable "$service" 2>/dev/null
+    systemctl enable "$svc" &>/dev/null
 }
 
-# 删除隧道服务
-remove_tunnel_service() {
-    local name=$1
-    local service=$(get_service_name "$name")
-    
-    systemctl stop "$service" 2>/dev/null
-    systemctl disable "$service" 2>/dev/null
-    rm -f "/etc/systemd/system/${service}.service"
+# 删除服务
+remove_service() {
+    local svc
+    svc=$(svc_name "$1")
+    systemctl stop "$svc" &>/dev/null
+    systemctl disable "$svc" &>/dev/null
+    rm -f "/etc/systemd/system/${svc}.service"
     systemctl daemon-reload
 }
 
 # 启动隧道
 start_tunnel() {
-    local name=$1
-    local service=$(get_service_name "$name")
-    systemctl start "$service"
+    systemctl start "$(svc_name "$1")"
 }
 
 # 停止隧道
 stop_tunnel() {
-    local name=$1
-    local service=$(get_service_name "$name")
-    systemctl stop "$service"
+    systemctl stop "$(svc_name "$1")"
 }
 
 # 重启隧道
 restart_tunnel() {
-    local name=$1
-    local service=$(get_service_name "$name")
-    systemctl restart "$service"
+    systemctl restart "$(svc_name "$1")"
 }
 
-# 清理端口占用
-clean_port() {
+# 清理端口
+kill_port() {
     local port=$1
     if command -v fuser &>/dev/null; then
-        fuser -k ${port}/tcp 2>/dev/null
-        fuser -k ${port}/udp 2>/dev/null
+        fuser -k "${port}/tcp" &>/dev/null
+        fuser -k "${port}/udp" &>/dev/null
     fi
     sleep 1
 }
 
 #===============================================
-# 新增隧道
+# 1. 添加隧道
 #===============================================
 
-add_tunnel() {
-    print_logo
-    echo -e "${GREEN}============ 新增隧道 ============${NC}"
+menu_add() {
+    show_logo
+    echo -e "${G}══════════ 添加隧道 ══════════${N}"
     echo ""
-    echo -e "  ${GREEN}1.${NC} 落地隧道 (SS服务端)"
-    echo -e "  ${GREEN}2.${NC} 中转隧道 (端口转发)"
+    echo -e "  ${G}1.${N} 落地隧道 (SS服务端)"
+    echo -e "  ${G}2.${N} 中转隧道 (端口转发)"
     echo ""
-    echo -e "  ${NC}0.${NC} 返回上级"
+    echo -e "  ${N}0.${N} 返回"
     echo ""
-    read -p "请选择隧道类型 [0-2]: " TYPE
-    
-    case $TYPE in
-        1) add_landing_tunnel ;;
-        2) add_relay_tunnel ;;
+    read -rp "请选择 [0-2]: " choice
+
+    case $choice in
+        1) add_landing ;;
+        2) add_relay ;;
         0) return ;;
-        *) echo -e "${RED}[✗]${NC} 无效选项" ;;
+        *) msg_error "无效选项" ;;
     esac
 }
 
-# 新增落地隧道
-add_landing_tunnel() {
+add_landing() {
     echo ""
-    echo -e "${CYAN}>>> 新增落地隧道 (SS服务端)${NC}"
+    echo -e "${C}>>> 添加落地隧道${N}"
     echo ""
-    
-    # 输入隧道名称
-    read -p "请输入隧道名称 [默认: landing1]: " TUNNEL_NAME
-    TUNNEL_NAME=${TUNNEL_NAME:-landing1}
-    
-    # 检查是否已存在
-    if tunnel_exists "$TUNNEL_NAME"; then
-        echo -e "${YELLOW}[!]${NC} 隧道 '$TUNNEL_NAME' 已存在"
-        read -p "是否覆盖? [y/N]: " CONFIRM
-        [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && return
+
+    # 名称
+    read -rp "隧道名称 [默认: ss-8443]: " name
+    name=${name:-ss-8443}
+    name=$(echo "$name" | tr ' ' '-')
+
+    if tunnel_exists "$name"; then
+        msg_warn "隧道 '$name' 已存在"
+        read -rp "是否覆盖? [y/N]: " yn
+        [[ ! "$yn" =~ ^[Yy]$ ]] && return
+        remove_service "$name"
     fi
-    
-    read -p "请输入监听端口 [默认: 8443]: " SS_PORT
-    SS_PORT=${SS_PORT:-8443}
-    
-    read -p "请输入加密方式 [默认: chacha20-ietf-poly1305]: " SS_METHOD
-    SS_METHOD=${SS_METHOD:-chacha20-ietf-poly1305}
-    
-    read -p "请输入密码 [默认: Qwert1470]: " SS_PASSWORD
-    SS_PASSWORD=${SS_PASSWORD:-Qwert1470}
-    
+
+    # 配置
+    read -rp "监听端口 [默认: 8443]: " port
+    port=${port:-8443}
+
+    read -rp "加密方式 [默认: chacha20-ietf-poly1305]: " method
+    method=${method:-chacha20-ietf-poly1305}
+
+    read -rp "密码 [默认: Qwert1470]: " passwd
+    passwd=${passwd:-Qwert1470}
+
+    # 确认
     echo ""
-    echo -e "${YELLOW}配置确认:${NC}"
-    echo "  名称: $TUNNEL_NAME"
-    echo "  类型: 落地隧道"
-    echo "  端口: $SS_PORT"
-    echo "  加密: $SS_METHOD"
-    echo "  密码: $SS_PASSWORD"
+    echo -e "${Y}请确认配置:${N}"
+    echo "  名称: $name"
+    echo "  端口: $port"
+    echo "  加密: $method"
+    echo "  密码: $passwd"
     echo ""
-    read -p "确认创建? [Y/n]: " CONFIRM
-    [[ "$CONFIRM" =~ ^[Nn]$ ]] && return
-    
-    # 安装 GOST
-    install_gost_binary || return 1
-    init_dirs
-    
+    read -rp "确认创建? [Y/n]: " yn
+    [[ "$yn" =~ ^[Nn]$ ]] && return
+
+    # 安装GOST
+    install_gost || return 1
+    init_env
+
     # 清理端口
-    clean_port $SS_PORT
-    
+    kill_port "$port"
+
     # 保存配置
-    cat > "$GOST_TUNNEL_DIR/$TUNNEL_NAME.json" << EOF
+    cat > "$TUNNEL_DIR/$name.json" <<EOF
 {
-    "name": "${TUNNEL_NAME}",
+    "name": "$name",
     "type": "landing",
-    "port": "${SS_PORT}",
-    "method": "${SS_METHOD}",
-    "password": "${SS_PASSWORD}"
+    "port": "$port",
+    "method": "$method",
+    "password": "$passwd"
 }
 EOF
-    
+
     # 创建服务
-    EXEC_CMD="${GOST_PATH} -L=ss://${SS_METHOD}:${SS_PASSWORD}@:${SS_PORT}"
-    create_tunnel_service "$TUNNEL_NAME" "$EXEC_CMD"
-    
-    # 启动服务
-    start_tunnel "$TUNNEL_NAME"
+    local cmd="$GOST_BIN -L=ss://${method}:${passwd}@:${port}"
+    create_service "$name" "$cmd"
+
+    # 启动
+    start_tunnel "$name"
     sleep 2
-    
+
     # 安装快捷命令
-    install_shortcut
-    
-    # 检查状态
-    if systemctl is-active --quiet "$(get_service_name "$TUNNEL_NAME")"; then
+    install_cmd
+
+    # 结果
+    if systemctl is-active --quiet "$(svc_name "$name")"; then
         echo ""
-        echo -e "${GREEN}============================================${NC}"
-        echo -e "${GREEN}          ✓ 落地隧道创建成功!${NC}"
-        echo -e "${GREEN}============================================${NC}"
-        echo ""
-        echo -e "  名称: ${CYAN}${TUNNEL_NAME}${NC}"
-        echo -e "  端口: ${CYAN}${SS_PORT}${NC}"
-        echo -e "  加密: ${CYAN}${SS_METHOD}${NC}"
-        echo -e "  密码: ${CYAN}${SS_PASSWORD}${NC}"
-        echo ""
-        echo -e "${GREEN}============================================${NC}"
+        echo -e "${G}════════════════════════════════════${N}"
+        echo -e "${G}        ✓ 落地隧道创建成功!${N}"
+        echo -e "${G}════════════════════════════════════${N}"
+        echo -e "  名称: ${C}$name${N}"
+        echo -e "  端口: ${C}$port${N}"
+        echo -e "  加密: ${C}$method${N}"
+        echo -e "  密码: ${C}$passwd${N}"
+        echo -e "${G}════════════════════════════════════${N}"
     else
-        echo -e "${RED}[✗]${NC} 隧道启动失败"
-        systemctl status "$(get_service_name "$TUNNEL_NAME")" --no-pager
+        msg_error "启动失败"
+        systemctl status "$(svc_name "$name")" --no-pager
     fi
 }
 
-# 新增中转隧道
-add_relay_tunnel() {
+add_relay() {
     echo ""
-    echo -e "${CYAN}>>> 新增中转隧道 (端口转发)${NC}"
+    echo -e "${C}>>> 添加中转隧道${N}"
     echo ""
-    
-    read -p "请输入隧道名称 [默认: relay1]: " TUNNEL_NAME
-    TUNNEL_NAME=${TUNNEL_NAME:-relay1}
-    
-    if tunnel_exists "$TUNNEL_NAME"; then
-        echo -e "${YELLOW}[!]${NC} 隧道 '$TUNNEL_NAME' 已存在"
-        read -p "是否覆盖? [y/N]: " CONFIRM
-        [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && return
+
+    # 名称
+    read -rp "隧道名称 [默认: relay-51520]: " name
+    name=${name:-relay-51520}
+    name=$(echo "$name" | tr ' ' '-')
+
+    if tunnel_exists "$name"; then
+        msg_warn "隧道 '$name' 已存在"
+        read -rp "是否覆盖? [y/N]: " yn
+        [[ ! "$yn" =~ ^[Yy]$ ]] && return
+        remove_service "$name"
     fi
-    
-    read -p "请输入落地鸡IP [必填]: " REMOTE_IP
-    [ -z "$REMOTE_IP" ] && { echo -e "${RED}[✗]${NC} IP不能为空"; return; }
-    
-    read -p "请输入落地鸡端口 [默认: 8443]: " REMOTE_PORT
-    REMOTE_PORT=${REMOTE_PORT:-8443}
-    
-    read -p "请输入本地监听端口 [默认: 51520]: " LOCAL_PORT
-    LOCAL_PORT=${LOCAL_PORT:-51520}
-    
+
+    # 配置
+    read -rp "落地鸡 IP [必填]: " remote_ip
+    if [[ -z "$remote_ip" ]]; then
+        msg_error "IP 不能为空"
+        return
+    fi
+
+    read -rp "落地鸡端口 [默认: 8443]: " remote_port
+    remote_port=${remote_port:-8443}
+
+    read -rp "本地监听端口 [默认: 51520]: " local_port
+    local_port=${local_port:-51520}
+
+    # 确认
     echo ""
-    echo -e "${YELLOW}配置确认:${NC}"
-    echo "  名称: $TUNNEL_NAME"
-    echo "  类型: 中转隧道"
-    echo "  本地端口: $LOCAL_PORT"
-    echo "  目标地址: $REMOTE_IP:$REMOTE_PORT"
+    echo -e "${Y}请确认配置:${N}"
+    echo "  名称: $name"
+    echo "  本地端口: $local_port"
+    echo "  目标: $remote_ip:$remote_port"
     echo ""
-    read -p "确认创建? [Y/n]: " CONFIRM
-    [[ "$CONFIRM" =~ ^[Nn]$ ]] && return
-    
-    # 安装 GOST
-    install_gost_binary || return 1
-    init_dirs
-    
-    # 测试连通性
-    echo -e "${GREEN}[*]${NC} 测试落地鸡连通性..."
-    if timeout 3 bash -c "echo >/dev/tcp/${REMOTE_IP}/${REMOTE_PORT}" 2>/dev/null; then
-        echo -e "${GREEN}[✓]${NC} 落地鸡连接正常"
+    read -rp "确认创建? [Y/n]: " yn
+    [[ "$yn" =~ ^[Nn]$ ]] && return
+
+    # 安装GOST
+    install_gost || return 1
+    init_env
+
+    # 测试连通
+    msg_info "测试落地鸡连通性..."
+    if timeout 3 bash -c "echo >/dev/tcp/$remote_ip/$remote_port" 2>/dev/null; then
+        msg_info "连接正常"
     else
-        echo -e "${YELLOW}[!]${NC} 无法连接落地鸡，继续创建..."
+        msg_warn "无法连接，继续创建..."
     fi
-    
+
     # 清理端口
-    clean_port $LOCAL_PORT
-    
+    kill_port "$local_port"
+
     # 保存配置
-    cat > "$GOST_TUNNEL_DIR/$TUNNEL_NAME.json" << EOF
+    cat > "$TUNNEL_DIR/$name.json" <<EOF
 {
-    "name": "${TUNNEL_NAME}",
+    "name": "$name",
     "type": "relay",
-    "local_port": "${LOCAL_PORT}",
-    "remote_ip": "${REMOTE_IP}",
-    "remote_port": "${REMOTE_PORT}"
+    "local_port": "$local_port",
+    "remote_ip": "$remote_ip",
+    "remote_port": "$remote_port"
 }
 EOF
-    
+
     # 创建服务
-    EXEC_CMD="${GOST_PATH} -L=tcp://:${LOCAL_PORT}/${REMOTE_IP}:${REMOTE_PORT} -L=udp://:${LOCAL_PORT}/${REMOTE_IP}:${REMOTE_PORT}"
-    create_tunnel_service "$TUNNEL_NAME" "$EXEC_CMD"
-    
-    # 启动服务
-    start_tunnel "$TUNNEL_NAME"
+    local cmd="$GOST_BIN -L=tcp://:${local_port}/${remote_ip}:${remote_port} -L=udp://:${local_port}/${remote_ip}:${remote_port}"
+    create_service "$name" "$cmd"
+
+    # 启动
+    start_tunnel "$name"
     sleep 2
-    
+
     # 安装快捷命令
-    install_shortcut
-    
-    # 检查状态
-    if systemctl is-active --quiet "$(get_service_name "$TUNNEL_NAME")"; then
+    install_cmd
+
+    # 结果
+    if systemctl is-active --quiet "$(svc_name "$name")"; then
         echo ""
-        echo -e "${GREEN}============================================${NC}"
-        echo -e "${GREEN}          ✓ 中转隧道创建成功!${NC}"
-        echo -e "${GREEN}============================================${NC}"
-        echo ""
-        echo -e "  名称: ${CYAN}${TUNNEL_NAME}${NC}"
-        echo -e "  本地: ${CYAN}0.0.0.0:${LOCAL_PORT}${NC}"
-        echo -e "  目标: ${CYAN}${REMOTE_IP}:${REMOTE_PORT}${NC}"
-        echo ""
-        echo -e "${GREEN}============================================${NC}"
+        echo -e "${G}════════════════════════════════════${N}"
+        echo -e "${G}        ✓ 中转隧道创建成功!${N}"
+        echo -e "${G}════════════════════════════════════${N}"
+        echo -e "  名称: ${C}$name${N}"
+        echo -e "  本地: ${C}0.0.0.0:$local_port${N}"
+        echo -e "  目标: ${C}$remote_ip:$remote_port${N}"
+        echo -e "${G}════════════════════════════════════${N}"
     else
-        echo -e "${RED}[✗]${NC} 隧道启动失败"
-        systemctl status "$(get_service_name "$TUNNEL_NAME")" --no-pager
+        msg_error "启动失败"
+        systemctl status "$(svc_name "$name")" --no-pager
     fi
 }
 
 #===============================================
-# 查看隧道列表
+# 2. 隧道列表
 #===============================================
 
-list_tunnels() {
-    print_logo
-    echo -e "${GREEN}============ 隧道列表 ============${NC}"
+menu_list() {
+    show_logo
+    echo -e "${G}══════════ 隧道列表 ══════════${N}"
     echo ""
-    
-    if [ "$(get_tunnel_count)" -eq 0 ]; then
-        echo -e "  ${YELLOW}暂无隧道${NC}"
+
+    local total
+    total=$(tunnel_count)
+
+    if [[ "$total" -eq 0 ]]; then
+        echo -e "  ${Y}暂无隧道，请先添加${N}"
         echo ""
         return
     fi
-    
-    printf "  ${CYAN}%-12s %-10s %-8s %-25s %s${NC}\n" "名称" "类型" "状态" "地址" "目标"
-    echo "  ─────────────────────────────────────────────────────────────────────"
-    
-    for tunnel in $(get_all_tunnels); do
-        CONFIG=$(read_tunnel_config "$tunnel")
-        TYPE=$(echo "$CONFIG" | grep '"type"' | sed 's/.*: *"\(.*\)".*/\1/')
-        STATUS=$(get_tunnel_status "$tunnel")
-        
-        if [ "$TYPE" = "landing" ]; then
-            PORT=$(echo "$CONFIG" | grep '"port"' | sed 's/.*: *"\(.*\)".*/\1/')
-            printf "  %-12s %-10s %-18b %-25s %s\n" "$tunnel" "落地" "$STATUS" "0.0.0.0:$PORT" "-"
-        elif [ "$TYPE" = "relay" ]; then
-            LOCAL=$(echo "$CONFIG" | grep '"local_port"' | sed 's/.*: *"\(.*\)".*/\1/')
-            REMOTE_IP=$(echo "$CONFIG" | grep '"remote_ip"' | sed 's/.*: *"\(.*\)".*/\1/')
-            REMOTE_PORT=$(echo "$CONFIG" | grep '"remote_port"' | sed 's/.*: *"\(.*\)".*/\1/')
-            printf "  %-12s %-10s %-18b %-25s %s\n" "$tunnel" "中转" "$STATUS" "0.0.0.0:$LOCAL" "$REMOTE_IP:$REMOTE_PORT"
+
+    printf "  ${C}%-15s %-8s %-10s %-20s %s${N}\n" "名称" "类型" "状态" "本地地址" "目标"
+    echo "  ────────────────────────────────────────────────────────────────"
+
+    for t in $(get_tunnels); do
+        local type status addr target
+        type=$(get_conf "$t" "type")
+        status=$(tunnel_status "$t")
+
+        if [[ "$type" == "landing" ]]; then
+            local port
+            port=$(get_conf "$t" "port")
+            addr="0.0.0.0:$port"
+            target="-"
+            printf "  %-15s %-8s %-20b %-20s %s\n" "$t" "落地" "$status" "$addr" "$target"
+        else
+            local lp rip rp
+            lp=$(get_conf "$t" "local_port")
+            rip=$(get_conf "$t" "remote_ip")
+            rp=$(get_conf "$t" "remote_port")
+            addr="0.0.0.0:$lp"
+            target="$rip:$rp"
+            printf "  %-15s %-8s %-20b %-20s %s\n" "$t" "中转" "$status" "$addr" "$target"
         fi
     done
-    
+
     echo ""
 }
 
 #===============================================
-# 删除隧道
+# 3. 隧道管理
 #===============================================
 
-delete_tunnel() {
-    print_logo
-    echo -e "${RED}============ 删除隧道 ============${NC}"
+menu_manage() {
+    show_logo
+    echo -e "${B}══════════ 隧道管理 ══════════${N}"
     echo ""
-    
-    if [ "$(get_tunnel_count)" -eq 0 ]; then
-        echo -e "  ${YELLOW}暂无隧道可删除${NC}"
+
+    local total
+    total=$(tunnel_count)
+
+    if [[ "$total" -eq 0 ]]; then
+        echo -e "  ${Y}暂无隧道${N}"
         return
     fi
-    
-    # 列出所有隧道
-    echo "可删除的隧道:"
+
+    # 列出隧道供选择
+    echo "选择要管理的隧道:"
     echo ""
-    i=1
-    declare -a TUNNEL_ARRAY
-    for tunnel in $(get_all_tunnels); do
-        STATUS=$(get_tunnel_status "$tunnel")
-        echo -e "  ${GREEN}$i.${NC} $tunnel [$STATUS]"
-        TUNNEL_ARRAY[$i]=$tunnel
+
+    local i=1
+    declare -a arr
+    for t in $(get_tunnels); do
+        local status
+        status=$(tunnel_status "$t")
+        echo -e "  ${G}$i.${N} $t [$status]"
+        arr[$i]=$t
         ((i++))
     done
+
     echo ""
-    echo -e "  ${NC}0.${NC} 返回"
+    echo -e "  ${N}0.${N} 返回"
     echo ""
-    
-    read -p "请选择要删除的隧道 [0-$((i-1))]: " CHOICE
-    
-    [ "$CHOICE" = "0" ] && return
-    [ -z "${TUNNEL_ARRAY[$CHOICE]}" ] && { echo -e "${RED}[✗]${NC} 无效选项"; return; }
-    
-    TUNNEL_NAME="${TUNNEL_ARRAY[$CHOICE]}"
-    
-    echo ""
-    read -p "确认删除隧道 '$TUNNEL_NAME'? [y/N]: " CONFIRM
-    [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && return
-    
-    # 删除服务和配置
-    remove_tunnel_service "$TUNNEL_NAME"
-    rm -f "$GOST_TUNNEL_DIR/$TUNNEL_NAME.json"
-    
-    echo ""
-    echo -e "${GREEN}[✓]${NC} 隧道 '$TUNNEL_NAME' 已删除"
+    read -rp "请选择 [0-$((i-1))]: " choice
+
+    [[ "$choice" == "0" ]] && return
+    [[ -z "${arr[$choice]}" ]] && { msg_error "无效选项"; return; }
+
+    local selected="${arr[$choice]}"
+    manage_single "$selected"
 }
 
-#===============================================
-# 隧道操作
-#===============================================
+manage_single() {
+    local name=$1
 
-manage_tunnel() {
-    print_logo
-    echo -e "${BLUE}============ 隧道操作 ============${NC}"
     echo ""
-    
-    if [ "$(get_tunnel_count)" -eq 0 ]; then
-        echo -e "  ${YELLOW}暂无隧道${NC}"
-        return
-    fi
-    
-    # 列出所有隧道
-    echo "选择隧道:"
+    echo -e "管理隧道: ${C}$name${N}"
     echo ""
-    i=1
-    declare -a TUNNEL_ARRAY
-    for tunnel in $(get_all_tunnels); do
-        STATUS=$(get_tunnel_status "$tunnel")
-        echo -e "  ${GREEN}$i.${NC} $tunnel [$STATUS]"
-        TUNNEL_ARRAY[$i]=$tunnel
-        ((i++))
-    done
+    echo -e "  ${G}1.${N} 启动"
+    echo -e "  ${G}2.${N} 停止"
+    echo -e "  ${G}3.${N} 重启"
+    echo -e "  ${G}4.${N} 查看日志"
+    echo -e "  ${G}5.${N} 查看配置"
+    echo -e "  ${R}6.${N} 删除"
     echo ""
-    echo -e "  ${NC}0.${NC} 返回"
+    echo -e "  ${N}0.${N} 返回"
     echo ""
-    
-    read -p "请选择隧道 [0-$((i-1))]: " CHOICE
-    
-    [ "$CHOICE" = "0" ] && return
-    [ -z "${TUNNEL_ARRAY[$CHOICE]}" ] && { echo -e "${RED}[✗]${NC} 无效选项"; return; }
-    
-    TUNNEL_NAME="${TUNNEL_ARRAY[$CHOICE]}"
-    
-    echo ""
-    echo -e "对 ${CYAN}$TUNNEL_NAME${NC} 执行操作:"
-    echo ""
-    echo -e "  ${GREEN}1.${NC} 启动"
-    echo -e "  ${GREEN}2.${NC} 停止"
-    echo -e "  ${GREEN}3.${NC} 重启"
-    echo -e "  ${GREEN}4.${NC} 查看日志"
-    echo -e "  ${GREEN}5.${NC} 查看详情"
-    echo ""
-    read -p "请选择 [1-5]: " ACTION
-    
-    case $ACTION in
+    read -rp "请选择 [0-6]: " choice
+
+    case $choice in
         1)
-            start_tunnel "$TUNNEL_NAME"
-            echo -e "${GREEN}[✓]${NC} 隧道已启动"
+            start_tunnel "$name"
+            sleep 1
+            msg_info "已启动"
             ;;
         2)
-            stop_tunnel "$TUNNEL_NAME"
-            echo -e "${GREEN}[✓]${NC} 隧道已停止"
+            stop_tunnel "$name"
+            msg_info "已停止"
             ;;
         3)
-            restart_tunnel "$TUNNEL_NAME"
-            echo -e "${GREEN}[✓]${NC} 隧道已重启"
+            restart_tunnel "$name"
+            sleep 1
+            msg_info "已重启"
             ;;
         4)
             echo ""
-            echo -e "${CYAN}日志 (Ctrl+C 退出):${NC}"
-            journalctl -u "$(get_service_name "$TUNNEL_NAME")" -f
+            echo -e "${C}═══ 日志 (Ctrl+C 退出) ═══${N}"
+            journalctl -u "$(svc_name "$name")" -f --no-pager
             ;;
         5)
             echo ""
-            echo -e "${CYAN}配置详情:${NC}"
-            cat "$GOST_TUNNEL_DIR/$TUNNEL_NAME.json" | sed 's/^/  /'
+            echo -e "${C}═══ 配置 ═══${N}"
+            cat "$TUNNEL_DIR/$name.json"
             echo ""
-            echo -e "${CYAN}服务状态:${NC}"
-            systemctl status "$(get_service_name "$TUNNEL_NAME")" --no-pager | sed 's/^/  /'
+            echo -e "${C}═══ 服务状态 ═══${N}"
+            systemctl status "$(svc_name "$name")" --no-pager
             ;;
+        6)
+            echo ""
+            read -rp "确认删除 '$name'? [y/N]: " yn
+            if [[ "$yn" =~ ^[Yy]$ ]]; then
+                remove_service "$name"
+                rm -f "$TUNNEL_DIR/$name.json"
+                msg_info "隧道 '$name' 已删除"
+            fi
+            ;;
+        0) return ;;
+        *) msg_error "无效选项" ;;
     esac
 }
 
 #===============================================
-# 批量操作
+# 4. 批量操作
 #===============================================
 
-start_all_tunnels() {
-    echo -e "${GREEN}[*]${NC} 启动所有隧道..."
-    for tunnel in $(get_all_tunnels); do
-        start_tunnel "$tunnel"
-        echo -e "  ${GREEN}[✓]${NC} $tunnel"
-    done
-    echo -e "${GREEN}[✓]${NC} 全部启动完成"
-}
+menu_batch() {
+    show_logo
+    echo -e "${B}══════════ 批量操作 ══════════${N}"
+    echo ""
 
-stop_all_tunnels() {
-    echo -e "${GREEN}[*]${NC} 停止所有隧道..."
-    for tunnel in $(get_all_tunnels); do
-        stop_tunnel "$tunnel"
-        echo -e "  ${GREEN}[✓]${NC} $tunnel"
-    done
-    echo -e "${GREEN}[✓]${NC} 全部停止完成"
-}
+    local total
+    total=$(tunnel_count)
 
-restart_all_tunnels() {
-    echo -e "${GREEN}[*]${NC} 重启所有隧道..."
-    for tunnel in $(get_all_tunnels); do
-        restart_tunnel "$tunnel"
-        echo -e "  ${GREEN}[✓]${NC} $tunnel"
-    done
-    echo -e "${GREEN}[✓]${NC} 全部重启完成"
+    if [[ "$total" -eq 0 ]]; then
+        echo -e "  ${Y}暂无隧道${N}"
+        return
+    fi
+
+    echo -e "  ${G}1.${N} 启动全部"
+    echo -e "  ${G}2.${N} 停止全部"
+    echo -e "  ${G}3.${N} 重启全部"
+    echo ""
+    echo -e "  ${N}0.${N} 返回"
+    echo ""
+    read -rp "请选择 [0-3]: " choice
+
+    case $choice in
+        1)
+            echo ""
+            for t in $(get_tunnels); do
+                start_tunnel "$t"
+                echo -e "  ${G}[✓]${N} $t 已启动"
+            done
+            msg_info "全部启动完成"
+            ;;
+        2)
+            echo ""
+            for t in $(get_tunnels); do
+                stop_tunnel "$t"
+                echo -e "  ${G}[✓]${N} $t 已停止"
+            done
+            msg_info "全部停止完成"
+            ;;
+        3)
+            echo ""
+            for t in $(get_tunnels); do
+                restart_tunnel "$t"
+                echo -e "  ${G}[✓]${N} $t 已重启"
+            done
+            msg_info "全部重启完成"
+            ;;
+        0) return ;;
+        *) msg_error "无效选项" ;;
+    esac
 }
 
 #===============================================
-# 卸载
+# 9. 卸载
 #===============================================
 
-uninstall_all() {
-    print_logo
-    echo -e "${RED}============ 完全卸载 ============${NC}"
+menu_uninstall() {
+    show_logo
+    echo -e "${R}══════════ 完全卸载 ══════════${N}"
     echo ""
-    
-    echo -e "${YELLOW}将删除以下内容:${NC}"
-    echo "  - 所有隧道配置和服务"
-    echo "  - GOST 程序"
-    echo "  - 快捷命令 gg"
+    echo -e "${Y}将删除:${N}"
+    echo "  • 所有隧道及服务"
+    echo "  • GOST 程序"
+    echo "  • 配置文件"
+    echo "  • 快捷命令 gg"
     echo ""
-    
-    read -p "确认完全卸载? [y/N]: " CONFIRM
-    [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && return
-    
+    read -rp "确认卸载? [y/N]: " yn
+    [[ ! "$yn" =~ ^[Yy]$ ]] && return
+
     echo ""
-    
-    # 停止并删除所有隧道服务
-    for tunnel in $(get_all_tunnels); do
-        echo -e "${GREEN}[*]${NC} 删除隧道: $tunnel"
-        remove_tunnel_service "$tunnel"
+
+    # 删除所有隧道
+    for t in $(get_tunnels); do
+        msg_info "删除隧道: $t"
+        remove_service "$t"
+        rm -f "$TUNNEL_DIR/$t.json"
     done
-    
-    # 删除旧版单一服务（兼容）
-    systemctl stop gost 2>/dev/null
-    systemctl disable gost 2>/dev/null
+
+    # 删除旧版服务
+    systemctl stop gost &>/dev/null
+    systemctl disable gost &>/dev/null
     rm -f /etc/systemd/system/gost.service
-    
+
     # 删除文件
-    echo -e "${GREEN}[*]${NC} 删除文件..."
-    rm -f "$GOST_PATH"
-    rm -rf "$GOST_CONF_DIR"
-    rm -f "$MANAGER_PATH"
-    rm -f /usr/bin/gg
-    
+    rm -f "$GOST_BIN"
+    rm -rf "$CONF_DIR"
+    rm -f "$MANAGER_CMD"
+
     systemctl daemon-reload
-    
+
     echo ""
-    echo -e "${GREEN}============================================${NC}"
-    echo -e "${GREEN}          ✓ GOST 已完全卸载${NC}"
-    echo -e "${GREEN}============================================${NC}"
+    echo -e "${G}════════════════════════════════${N}"
+    echo -e "${G}      ✓ GOST 已完全卸载${N}"
+    echo -e "${G}════════════════════════════════${N}"
 }
 
 #===============================================
@@ -663,47 +673,43 @@ uninstall_all() {
 
 main_menu() {
     while true; do
-        print_logo
-        
-        # 状态统计
-        TOTAL=$(get_tunnel_count)
-        RUNNING=0
-        for tunnel in $(get_all_tunnels); do
-            systemctl is-active --quiet "$(get_service_name "$tunnel")" && ((RUNNING++))
-        done
-        
-        echo -e "  隧道统计: ${GREEN}${RUNNING}${NC} 运行中 / ${CYAN}${TOTAL}${NC} 总计"
+        show_logo
+
+        local total running
+        total=$(tunnel_count)
+        running=$(running_count)
+
+        # GOST状态
+        if check_gost; then
+            echo -e "  GOST: ${G}已安装${N} ($($GOST_BIN -V 2>&1 | grep -oP 'gost \K[0-9.]+'))"
+        else
+            echo -e "  GOST: ${Y}未安装${N}"
+        fi
+        echo -e "  隧道: ${G}$running${N} 运行 / ${C}$total${N} 总计"
         echo ""
-        echo -e "${CYAN}================== 主菜单 ==================${NC}"
+
+        echo -e "${C}═══════════════ 主菜单 ═══════════════${N}"
         echo ""
-        echo -e "  ${GREEN}1.${NC} 查看隧道"
-        echo -e "  ${GREEN}2.${NC} 新增隧道"
-        echo -e "  ${GREEN}3.${NC} 删除隧道"
-        echo -e "  ${GREEN}4.${NC} 隧道操作 (启动/停止/重启/日志)"
+        echo -e "  ${G}1.${N} 添加隧道"
+        echo -e "  ${G}2.${N} 隧道列表"
+        echo -e "  ${G}3.${N} 隧道管理"
+        echo -e "  ${G}4.${N} 批量操作"
         echo ""
-        echo -e "  ${BLUE}5.${NC} 启动全部"
-        echo -e "  ${BLUE}6.${NC} 停止全部"
-        echo -e "  ${BLUE}7.${NC} 重启全部"
+        echo -e "  ${R}9.${N} 完全卸载"
+        echo -e "  ${N}0.${N} 退出"
         echo ""
-        echo -e "  ${RED}8.${NC} 完全卸载"
+        echo -e "${C}══════════════════════════════════════${N}"
         echo ""
-        echo -e "  ${NC}0.${NC} 退出"
-        echo ""
-        echo -e "${CYAN}==============================================${NC}"
-        echo ""
-        read -p "请选择 [0-8]: " CHOICE
-        
-        case $CHOICE in
-            1) list_tunnels; press_any_key ;;
-            2) add_tunnel; press_any_key ;;
-            3) delete_tunnel; press_any_key ;;
-            4) manage_tunnel; press_any_key ;;
-            5) start_all_tunnels; press_any_key ;;
-            6) stop_all_tunnels; press_any_key ;;
-            7) restart_all_tunnels; press_any_key ;;
-            8) uninstall_all; exit 0 ;;
+        read -rp "请选择 [0-9]: " choice
+
+        case $choice in
+            1) menu_add; pause ;;
+            2) menu_list; pause ;;
+            3) menu_manage; pause ;;
+            4) menu_batch; pause ;;
+            9) menu_uninstall; exit 0 ;;
             0) echo ""; echo "再见!"; exit 0 ;;
-            *) echo -e "${RED}[✗]${NC} 无效选项"; sleep 1 ;;
+            *) msg_error "无效选项"; sleep 1 ;;
         esac
     done
 }
@@ -712,8 +718,14 @@ main_menu() {
 # 入口
 #===============================================
 
-# 初始化
-init_dirs
+# 必须root运行
+if [[ $EUID -ne 0 ]]; then
+    echo -e "${R}[✗]${N} 请使用 root 用户运行"
+    exit 1
+fi
 
-# 启动菜单
+# 初始化
+init_env
+
+# 启动主菜单
 main_menu
