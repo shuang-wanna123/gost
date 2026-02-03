@@ -96,29 +96,46 @@ install_gost() {
 }
 
 install_cmd() {
-    # 已经是 gg 命令运行则跳过
-    [[ "$0" == "$MANAGER_CMD" ]] && return 0
+    # 已安装则跳过
+    [[ -x "$MANAGER_CMD" && -s "$MANAGER_CMD" ]] && return 0
 
-    # 确保目录存在
-    mkdir -p "$(dirname "$MANAGER_CMD")" 2>/dev/null
+    # 使用 declare 从内存重建脚本
+    {
+        echo '#!/bin/bash'
+        echo '#==============================================='
+        echo '# GOST 多隧道管理脚本 v2.0'
+        echo '# 快捷命令: gg'
+        echo '#==============================================='
+        echo ''
+        echo "GOST_BIN=\"$GOST_BIN\""
+        echo "CONF_DIR=\"$CONF_DIR\""
+        echo "TUNNEL_DIR=\"$TUNNEL_DIR\""
+        echo "SERVICE_PREFIX=\"$SERVICE_PREFIX\""
+        echo "MANAGER_CMD=\"$MANAGER_CMD\""
+        echo "GOST_VER=\"$GOST_VER\""
+        echo ''
+        echo "R='$R'"
+        echo "G='$G'"
+        echo "Y='$Y'"
+        echo "C='$C'"
+        echo "B='$B'"
+        echo "N='$N'"
+        echo ''
+        declare -f
+        echo ''
+        echo 'if [[ $EUID -ne 0 ]]; then'
+        echo '    echo -e "${R}[✗]${N} 请使用 root 用户运行"'
+        echo '    exit 1'
+        echo 'fi'
+        echo ''
+        echo 'init_env'
+        echo 'main_menu'
+    } > "$MANAGER_CMD"
 
-    # 复制脚本到 /usr/local/bin/gg
-    if [[ -f "$0" && ! "$0" =~ ^/dev/fd/ && ! "$0" =~ ^/proc/ ]]; then
-        cp -f "$0" "$MANAGER_CMD"
-    else
-        cat "$0" > "$MANAGER_CMD" 2>/dev/null
-    fi
-
-    # 设置权限
-    chmod 755 "$MANAGER_CMD" 2>/dev/null
-
-    # 创建 /usr/bin/gg 软链接（兼容所有系统）
+    chmod 755 "$MANAGER_CMD"
     ln -sf "$MANAGER_CMD" /usr/bin/gg 2>/dev/null
-
-    # 刷新命令缓存
     hash -r 2>/dev/null
 
-    # 验证安装
     [[ -x "$MANAGER_CMD" ]] && msg_info "快捷命令已安装: gg"
 }
 
