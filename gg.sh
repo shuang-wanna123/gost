@@ -99,22 +99,27 @@ install_cmd() {
     # 已经是 gg 命令运行则跳过
     [[ "$0" == "$MANAGER_CMD" ]] && return 0
 
-    local src=""
+    # 确保目录存在
+    mkdir -p "$(dirname "$MANAGER_CMD")" 2>/dev/null
 
-    # 尝试获取脚本真实路径
-    if [[ -f "${BASH_SOURCE[0]}" ]]; then
-        src="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-    elif [[ -f "$0" ]]; then
-        src="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$(basename "$0")"
+    # 复制脚本到 /usr/local/bin/gg
+    if [[ -f "$0" && ! "$0" =~ ^/dev/fd/ && ! "$0" =~ ^/proc/ ]]; then
+        cp -f "$0" "$MANAGER_CMD"
+    else
+        cat "$0" > "$MANAGER_CMD" 2>/dev/null
     fi
 
-    # 复制到系统目录
-    if [[ -n "$src" && -f "$src" ]]; then
-        cp -f "$src" "$MANAGER_CMD" 2>/dev/null
-        chmod +x "$MANAGER_CMD" 2>/dev/null
-        hash -r 2>/dev/null
-        msg_info "快捷命令已安装: gg"
-    fi
+    # 设置权限
+    chmod 755 "$MANAGER_CMD" 2>/dev/null
+
+    # 创建 /usr/bin/gg 软链接（兼容所有系统）
+    ln -sf "$MANAGER_CMD" /usr/bin/gg 2>/dev/null
+
+    # 刷新命令缓存
+    hash -r 2>/dev/null
+
+    # 验证安装
+    [[ -x "$MANAGER_CMD" ]] && msg_info "快捷命令已安装: gg"
 }
 
 #===============================================
@@ -126,7 +131,6 @@ svc_name() {
 }
 
 get_tunnels() {
-    # 兼容性写法，避免 find -printf 问题
     for f in "$TUNNEL_DIR"/*.json; do
         [[ -f "$f" ]] && basename "$f" .json
     done 2>/dev/null | sort
@@ -593,6 +597,7 @@ menu_uninstall() {
     rm -f "$GOST_BIN"
     rm -rf "$CONF_DIR"
     rm -f "$MANAGER_CMD"
+    rm -f /usr/bin/gg
     systemctl daemon-reload
 
     echo ""
