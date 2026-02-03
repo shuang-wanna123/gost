@@ -240,7 +240,7 @@ add_landing() {
 
     read -rp "隧道名称 [回车默认: ss-8443]: " name
     name=${name:-ss-8443}
-    name=$(echo "$name" | tr ' ' '-')
+    name=$(echo "$name" | tr -cd 'a-zA-Z0-9_-')
 
     if tunnel_exists "$name"; then
         msg_warn "隧道 '$name' 已存在"
@@ -311,7 +311,7 @@ add_relay() {
 
     read -rp "隧道名称 [回车默认: relay-51520]: " name
     name=${name:-relay-51520}
-    name=$(echo "$name" | tr ' ' '-')
+    name=$(echo "$name" | tr -cd 'a-zA-Z0-9_-')
 
     if tunnel_exists "$name"; then
         msg_warn "隧道 '$name' 已存在"
