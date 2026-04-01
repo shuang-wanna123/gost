@@ -1,7 +1,11 @@
+下面是完整成品。已经把这几件事并进去了：GOST 升到 v3，保留原来的菜单结构和功能，`gg` 快捷方式在脚本启动时就会刷新安装，中转隧道创建成功后会自动显示可直接导入 v2rayN 的 `ss://` 链接，名称里的方向键转义字符也会被过滤掉。
+
+```bash
 #!/bin/bash
 #===============================================
 # GOST 多隧道管理脚本 v2.0
 # 快捷命令: gg
+# GOST版本: v3
 #===============================================
 
 GOST_BIN="/usr/local/bin/gost"
@@ -9,7 +13,7 @@ CONF_DIR="/etc/gost"
 TUNNEL_DIR="/etc/gost/tunnels"
 SERVICE_PREFIX="gost-tun"
 MANAGER_CMD="/usr/local/bin/gg"
-GOST_VER="2.11.5"
+GOST_VER="3.0.0"
 
 R='\033[0;31m'
 G='\033[0;32m'
@@ -17,10 +21,6 @@ Y='\033[1;33m'
 C='\033[0;36m'
 B='\033[0;34m'
 N='\033[0m'
-
-#===============================================
-# 工具函数
-#===============================================
 
 msg_info()  { echo -e "${G}[✓]${N} $1"; }
 msg_warn()  { echo -e "${Y}[!]${N} $1"; }
@@ -49,21 +49,42 @@ show_logo() {
     echo ""
 }
 
-#===============================================
-# GOST 安装
-#===============================================
-
 check_gost() {
     [[ -x "$GOST_BIN" ]]
 }
 
+get_server_ip() {
+    local ip=""
+    if command -v curl &>/dev/null; then
+        ip=$(curl -4fsS --max-time 5 https://api.ipify.org 2>/dev/null)
+        [[ -z "$ip" ]] && ip=$(curl -4fsS --max-time 5 https://ipv4.icanhazip.com 2>/dev/null | tr -d '\r\n')
+    elif command -v wget &>/dev/null; then
+        ip=$(wget -qO- -T 5 https://api.ipify.org 2>/dev/null | tr -d '\r\n')
+        [[ -z "$ip" ]] && ip=$(wget -qO- -T 5 https://ipv4.icanhazip.com 2>/dev/null | tr -d '\r\n')
+    fi
+    [[ -z "$ip" ]] && ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    echo "$ip"
+}
+
+build_ss_link() {
+    local method=$1 password=$2 host=$3 port=$4 tag=$5 auth
+    auth=$(printf '%s' "${method}:${password}" | base64 | tr -d '\r\n=' | tr '+/' '-_')
+    printf 'ss://%s@%s:%s#%s\n' "$auth" "$host" "$port" "$tag"
+}
+
 install_gost() {
     if check_gost; then
-        msg_info "GOST 已安装: $($GOST_BIN -V 2>&1 | head -1)"
-        return 0
+        local ver
+        ver=$("$GOST_BIN" -V 2>&1 | head -1)
+        if echo "$ver" | grep -Eq '(^|[[:space:]]|v)3\.'; then
+            msg_info "GOST 已安装: $ver"
+            return 0
+        fi
+        msg_warn "检测到旧版 GOST: $ver"
+        msg_info "正在升级到 GOST v3..."
+    else
+        msg_info "正在下载 GOST v3..."
     fi
-
-    msg_info "正在下载 GOST..."
 
     local arch
     case "$(uname -m)" in
@@ -74,37 +95,46 @@ install_gost() {
         *) msg_error "不支持的架构: $(uname -m)"; return 1 ;;
     esac
 
-    local url="https://github.com/ginuerzh/gost/releases/download/v${GOST_VER}/gost-linux-${arch}-${GOST_VER}.gz"
+    local url="https://github.com/go-gost/gost/releases/download/v${GOST_VER}/gost_${GOST_VER}_linux_${arch}.tar.gz"
+    local tmpdir="/tmp/gost-install.$$"
+    local bin_path=""
 
+    rm -rf "$tmpdir"
+    mkdir -p "$tmpdir" || return 1
     cd /tmp || return 1
-    rm -f gost.gz gost 2>/dev/null
+    rm -f gost.tar.gz 2>/dev/null
 
     if command -v wget &>/dev/null; then
-        wget -q --show-progress -O gost.gz "$url" || { msg_error "下载失败"; return 1; }
+        wget -q --show-progress -O gost.tar.gz "$url" || { rm -rf "$tmpdir"; msg_error "下载失败"; return 1; }
     elif command -v curl &>/dev/null; then
-        curl -L -o gost.gz "$url" || { msg_error "下载失败"; return 1; }
+        curl -L -o gost.tar.gz "$url" || { rm -rf "$tmpdir"; msg_error "下载失败"; return 1; }
     else
+        rm -rf "$tmpdir"
         msg_error "请先安装 wget 或 curl"
         return 1
     fi
 
-    gunzip -f gost.gz || { msg_error "解压失败"; return 1; }
-    chmod +x gost
-    mv -f gost "$GOST_BIN"
+    tar -xzf gost.tar.gz -C "$tmpdir" || { rm -rf "$tmpdir" gost.tar.gz; msg_error "解压失败"; return 1; }
+    bin_path=$(find "$tmpdir" -type f -name gost | head -1)
+
+    [[ -z "$bin_path" ]] && { rm -rf "$tmpdir" gost.tar.gz; msg_error "未找到 gost 可执行文件"; return 1; }
+
+    chmod +x "$bin_path"
+    mv -f "$bin_path" "$GOST_BIN"
+    rm -rf "$tmpdir" gost.tar.gz
 
     msg_info "GOST 安装成功: $($GOST_BIN -V 2>&1 | head -1)"
 }
 
 install_cmd() {
-    # 已安装则跳过
-    [[ -x "$MANAGER_CMD" && -s "$MANAGER_CMD" ]] && return 0
+    mkdir -p "$(dirname "$MANAGER_CMD")" 2>/dev/null
 
-    # 使用 declare 从内存重建脚本
     {
         echo '#!/bin/bash'
         echo '#==============================================='
         echo '# GOST 多隧道管理脚本 v2.0'
         echo '# 快捷命令: gg'
+        echo '# GOST版本: v3'
         echo '#==============================================='
         echo ''
         echo "GOST_BIN=\"$GOST_BIN\""
@@ -129,19 +159,13 @@ install_cmd() {
         echo 'fi'
         echo ''
         echo 'init_env'
+        echo 'install_cmd >/dev/null 2>&1'
         echo 'main_menu'
     } > "$MANAGER_CMD"
 
-    chmod 755 "$MANAGER_CMD"
+    chmod 755 "$MANAGER_CMD" 2>/dev/null
     ln -sf "$MANAGER_CMD" /usr/bin/gg 2>/dev/null
-    hash -r 2>/dev/null
-
-    [[ -x "$MANAGER_CMD" ]] && msg_info "快捷命令已安装: gg"
 }
-
-#===============================================
-# 隧道核心函数
-#===============================================
 
 svc_name() {
     echo "${SERVICE_PREFIX}-$1"
@@ -187,8 +211,8 @@ tunnel_status() {
 }
 
 create_service() {
-    local name=$1 cmd=$2
-    local svc=$(svc_name "$name")
+    local name=$1 cmd=$2 svc
+    svc=$(svc_name "$name")
 
     cat > "/etc/systemd/system/${svc}.service" <<EOF
 [Unit]
@@ -211,16 +235,25 @@ EOF
 }
 
 remove_service() {
-    local svc=$(svc_name "$1")
+    local svc
+    svc=$(svc_name "$1")
     systemctl stop "$svc" &>/dev/null
     systemctl disable "$svc" &>/dev/null
     rm -f "/etc/systemd/system/${svc}.service"
     systemctl daemon-reload
 }
 
-start_tunnel()   { systemctl start "$(svc_name "$1")"; }
-stop_tunnel()    { systemctl stop "$(svc_name "$1")"; }
-restart_tunnel() { systemctl restart "$(svc_name "$1")"; }
+start_tunnel() {
+    systemctl start "$(svc_name "$1")"
+}
+
+stop_tunnel() {
+    systemctl stop "$(svc_name "$1")"
+}
+
+restart_tunnel() {
+    systemctl restart "$(svc_name "$1")"
+}
 
 kill_port() {
     local port=$1
@@ -230,10 +263,6 @@ kill_port() {
     fi
     sleep 1
 }
-
-#===============================================
-# 1. 添加隧道
-#===============================================
 
 menu_add() {
     show_logo
@@ -262,6 +291,7 @@ add_landing() {
     read -rp "隧道名称 [回车默认: ss-8443]: " name
     name=${name:-ss-8443}
     name=$(echo "$name" | tr -cd 'a-zA-Z0-9_-')
+    name=${name:-ss-8443}
 
     if tunnel_exists "$name"; then
         msg_warn "隧道 '$name' 已存在"
@@ -303,7 +333,7 @@ add_landing() {
 }
 EOF
 
-    local cmd="$GOST_BIN -L=ss://${method}:${passwd}@:${port}"
+    local cmd="$GOST_BIN -L ss://${method}:${passwd}@:${port}"
     create_service "$name" "$cmd"
     start_tunnel "$name"
     sleep 2
@@ -333,6 +363,7 @@ add_relay() {
     read -rp "隧道名称 [回车默认: relay-51520]: " name
     name=${name:-relay-51520}
     name=$(echo "$name" | tr -cd 'a-zA-Z0-9_-')
+    name=${name:-relay-51520}
 
     if tunnel_exists "$name"; then
         msg_warn "隧道 '$name' 已存在"
@@ -353,11 +384,19 @@ add_relay() {
     read -rp "请设置本地监听端口 [回车默认: 51520]: " local_port
     local_port=${local_port:-51520}
 
+    read -rp "请设置客户端加密方式 [回车默认: chacha20-ietf-poly1305]: " method
+    method=${method:-chacha20-ietf-poly1305}
+
+    read -rp "请设置客户端密码 [回车默认: Qwert1470]: " passwd
+    passwd=${passwd:-Qwert1470}
+
     echo ""
     echo -e "${Y}请确认配置:${N}"
     echo "  名称: $name"
     echo "  本地端口: $local_port"
     echo "  目标: $remote_ip:$remote_port"
+    echo "  加密: $method"
+    echo "  密码: $passwd"
     echo ""
     read -rp "确认创建? [Y/n]: " yn
     [[ "$yn" =~ ^[Nn]$ ]] && return
@@ -380,17 +419,23 @@ add_relay() {
     "type": "relay",
     "local_port": "$local_port",
     "remote_ip": "$remote_ip",
-    "remote_port": "$remote_port"
+    "remote_port": "$remote_port",
+    "method": "$method",
+    "password": "$passwd"
 }
 EOF
 
-    local cmd="$GOST_BIN -L=tcp://:${local_port}/${remote_ip}:${remote_port} -L=udp://:${local_port}/${remote_ip}:${remote_port}"
+    local cmd="$GOST_BIN -L tcp://:${local_port}/${remote_ip}:${remote_port} -L udp://:${local_port}/${remote_ip}:${remote_port}"
     create_service "$name" "$cmd"
     start_tunnel "$name"
     sleep 2
     install_cmd
 
     if systemctl is-active --quiet "$(svc_name "$name")"; then
+        local public_ip ss_link
+        public_ip=$(get_server_ip)
+        [[ -n "$public_ip" ]] && ss_link=$(build_ss_link "$method" "$passwd" "$public_ip" "$local_port" "$name")
+
         echo ""
         echo -e "${G}════════════════════════════════════${N}"
         echo -e "${G}        ✓ 中转隧道创建成功!${N}"
@@ -398,6 +443,13 @@ EOF
         echo -e "  名称: ${C}$name${N}"
         echo -e "  本地: ${C}0.0.0.0:$local_port${N}"
         echo -e "  目标: ${C}$remote_ip:$remote_port${N}"
+        echo -e "  加密: ${C}$method${N}"
+        echo -e "  密码: ${C}$passwd${N}"
+        if [[ -n "$ss_link" ]]; then
+            echo -e "  导入: ${C}$ss_link${N}"
+        else
+            echo -e "  导入: ${Y}未获取到公网 IP，未生成链接${N}"
+        fi
         echo -e "${G}════════════════════════════════════${N}"
     else
         msg_error "启动失败"
@@ -405,16 +457,13 @@ EOF
     fi
 }
 
-#===============================================
-# 2. 隧道列表
-#===============================================
-
 menu_list() {
     show_logo
     echo -e "${G}══════════ 隧道列表 ══════════${N}"
     echo ""
 
-    local total=$(tunnel_count)
+    local total
+    total=$(tunnel_count)
 
     if [[ "$total" -eq 0 ]]; then
         echo -e "  ${Y}暂无隧道，请先添加${N}"
@@ -426,32 +475,33 @@ menu_list() {
     echo "  ────────────────────────────────────────────────────────────────"
 
     for t in $(get_tunnels); do
-        local type=$(get_conf "$t" "type")
-        local status=$(tunnel_status "$t")
+        local type status
+        type=$(get_conf "$t" "type")
+        status=$(tunnel_status "$t")
 
         if [[ "$type" == "landing" ]]; then
-            local port=$(get_conf "$t" "port")
+            local port
+            port=$(get_conf "$t" "port")
             printf "  %-15s %-8s %-20b %-20s %s\n" "$t" "落地" "$status" "0.0.0.0:$port" "-"
         else
-            local lp=$(get_conf "$t" "local_port")
-            local rip=$(get_conf "$t" "remote_ip")
-            local rp=$(get_conf "$t" "remote_port")
+            local lp rip rp
+            lp=$(get_conf "$t" "local_port")
+            rip=$(get_conf "$t" "remote_ip")
+            rp=$(get_conf "$t" "remote_port")
             printf "  %-15s %-8s %-20b %-20s %s\n" "$t" "中转" "$status" "0.0.0.0:$lp" "$rip:$rp"
         fi
     done
+
     echo ""
 }
-
-#===============================================
-# 3. 隧道管理
-#===============================================
 
 menu_manage() {
     show_logo
     echo -e "${B}══════════ 隧道管理 ══════════${N}"
     echo ""
 
-    local total=$(tunnel_count)
+    local total
+    total=$(tunnel_count)
 
     if [[ "$total" -eq 0 ]]; then
         echo -e "  ${Y}暂无隧道${N}"
@@ -464,7 +514,8 @@ menu_manage() {
     local i=1
     declare -a arr
     for t in $(get_tunnels); do
-        local status=$(tunnel_status "$t")
+        local status
+        status=$(tunnel_status "$t")
         echo -e "  ${G}$i.${N} $t [$status]"
         arr[$i]=$t
         ((i++))
@@ -529,16 +580,13 @@ manage_single() {
     esac
 }
 
-#===============================================
-# 4. 批量操作
-#===============================================
-
 menu_batch() {
     show_logo
     echo -e "${B}══════════ 批量操作 ══════════${N}"
     echo ""
 
-    local total=$(tunnel_count)
+    local total
+    total=$(tunnel_count)
 
     if [[ "$total" -eq 0 ]]; then
         echo -e "  ${Y}暂无隧道${N}"
@@ -583,10 +631,6 @@ menu_batch() {
     esac
 }
 
-#===============================================
-# 9. 卸载
-#===============================================
-
 menu_uninstall() {
     show_logo
     echo -e "${R}══════════ 完全卸载 ══════════${N}"
@@ -623,24 +667,24 @@ menu_uninstall() {
     echo -e "${G}════════════════════════════════${N}"
 }
 
-#===============================================
-# 主菜单
-#===============================================
-
 main_menu() {
     while true; do
         show_logo
 
-        local total=$(tunnel_count)
-        local running=$(running_count)
+        local total running
+        total=$(tunnel_count)
+        running=$(running_count)
 
         if check_gost; then
-            echo -e "  GOST: ${G}已安装${N} ($($GOST_BIN -V 2>&1 | grep -oP 'gost \K[0-9.]+'))"
+            local ver
+            ver=$($GOST_BIN -V 2>&1 | head -1)
+            echo -e "  GOST: ${G}已安装${N} (${ver})"
         else
             echo -e "  GOST: ${Y}未安装${N}"
         fi
         echo -e "  隧道: ${G}$running${N} 运行 / ${C}$total${N} 总计"
         echo ""
+
         echo -e "${C}═══════════════ 主菜单 ═══════════════${N}"
         echo ""
         echo -e "  ${G}1.${N} 添加隧道"
@@ -667,14 +711,14 @@ main_menu() {
     done
 }
 
-#===============================================
-# 入口
-#===============================================
-
 if [[ $EUID -ne 0 ]]; then
     echo -e "${R}[✗]${N} 请使用 root 用户运行"
     exit 1
 fi
 
 init_env
+install_cmd
 main_menu
+```
+
+如果机器里已经有旧的 `gg`，直接用这份脚本跑一次就会把快捷方式覆盖刷新。
